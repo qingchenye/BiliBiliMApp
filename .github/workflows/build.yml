@@ -8,8 +8,9 @@ name: 云端构建
 # 未签名 ipa = 「底包（解密后的哔哩哔哩 .app/.ipa）」+「本次编译出的 tweak dylib」注入后重新打包。
 # 底包来源（按优先级）：
 #   1. 手动运行 workflow 时填写的 ipa_url
-#   2. 本仓库 Release（tag: target-app）里的资产 bilibili.ipa
-#   3. 都没有 → 用 MonkeyDev 自带的示例 App 做冒烟构建（只上传 artifact，不发布 Release）
+#   2. 本仓库 Release（tag: target-app）里的资产 bilibili.ipa（约定路径，推荐以后用这个）
+#   3. 本仓库 Release 里已有的成品 ipa（默认 V3.2.0/BiliBiliMApp_8.89.0.v3.2.0.ipa，见下方 env）
+#   4. 都没有 → 用 MonkeyDev 自带的示例 App 做冒烟构建（只上传 artifact，不发布 Release）
 on:
   push:
     branches: [main]
@@ -37,8 +38,10 @@ env:
   MONKEYDEV_DIR: /opt/MonkeyDev
   APP_TARGET: BiliBiliMD
   DYLIB_TARGET: BiliBiliMDDylib
-  BASE_IPA_TAG: target-app
-  BASE_IPA_ASSET: bilibili.ipa
+  # 底包（解密后的哔哩哔哩 ipa）所在的 Release 与资产名。
+  # 约定路径 target-app/bilibili.ipa 优先；换底包时改这两行，或把新底包传成约定路径。
+  BASE_IPA_TAG: V3.2.0
+  BASE_IPA_ASSET: BiliBiliMApp_8.89.0.v3.2.0.ipa
 
 jobs:
   build:
@@ -108,16 +111,17 @@ jobs:
             echo "底包来源：手动填写的直链"
             curl -fL --retry 3 --retry-all-errors -o "$BASE_IPA" "$INPUT_IPA_URL"
             MODE=real
+          elif gh release download target-app --pattern bilibili.ipa --dir "$RUNNER_TEMP" 2>/dev/null; then
+            echo "底包来源：Release target-app/bilibili.ipa（约定路径）"
+            BASE_IPA="$RUNNER_TEMP/bilibili.ipa"
+            MODE=real
           elif gh release download "$BASE_IPA_TAG" --pattern "$BASE_IPA_ASSET" --dir "$RUNNER_TEMP" 2>/dev/null; then
             echo "底包来源：Release ${BASE_IPA_TAG}/${BASE_IPA_ASSET}"
-            MODE=real
-          elif [ -f "$RUNNER_TEMP/$BASE_IPA_ASSET" ]; then
-            echo "底包来源：Release ${BASE_IPA_TAG}/${BASE_IPA_ASSET}"
+            BASE_IPA="$RUNNER_TEMP/$BASE_IPA_ASSET"
             MODE=real
           fi
 
           if [ "$MODE" = "real" ]; then
-            [ -f "$BASE_IPA" ] || BASE_IPA="$RUNNER_TEMP/$BASE_IPA_ASSET"
             test -f "$BASE_IPA"
             echo "底包大小：$(du -h "$BASE_IPA" | cut -f1)"
             # 底包必须是「一个 Payload/*.app」的未加密 ipa
@@ -130,7 +134,28 @@ jobs:
             rm -rf "$RUNNER_TEMP/base-app"
             mkdir -p "$RUNNER_TEMP/base-app"
             unzip -q -o "$BASE_IPA" -d "$RUNNER_TEMP/base-app"
+            rm -f "$BASE_IPA"
             BASE_APP=$(find "$RUNNER_TEMP/base-app/Payload" -maxdepth 1 -name '*.app' -type d | head -n 1)
+            test -d "$BASE_APP"
+
+            # 底包里若含 fat（arm64+arm64e）Mach-O，monkeyparser verify 会直接拒绝：
+            # "only thin arm64 is supported"。主程序本身是 arm64，这里统一瘦身成 arm64。
+            BASE_MAIN=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$BASE_APP/Info.plist")
+            BINARIES=("$BASE_APP/$BASE_MAIN")
+            while IFS= read -r -d '' f; do BINARIES+=("$f"); done \
+              < <(find "$BASE_APP/Frameworks" -type f -print0 2>/dev/null)
+            for f in "${BINARIES[@]}"; do
+              [ -f "$f" ] || continue
+              INFO=$(/usr/bin/lipo -info "$f" 2>/dev/null || true)
+              [ -n "$INFO" ] || continue
+              printf '%s' "$INFO" | grep -q 'Non-fat' && continue
+              if /usr/bin/lipo "$f" -thin arm64 -output "$f.__thin" 2>/dev/null; then
+                mv "$f.__thin" "$f"
+                echo "瘦身为 arm64：${f#"$BASE_APP"/}"
+              else
+                rm -f "$f.__thin"
+              fi
+            done
           else
             echo "::warning::未提供底包，使用 MonkeyDev 示例 App 做冒烟构建（产物不含哔哩哔哩）"
             BASE_APP="$MONKEYDEV_DIR/Resource/TargetApp.app"
