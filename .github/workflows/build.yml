@@ -127,15 +127,22 @@ jobs:
               unzip -Z1 "$BASE_IPA" | head -20
               exit 1
             fi
-            cp "$BASE_IPA" "$APP_TARGET/TargetApp/base.ipa"
+            rm -rf "$RUNNER_TEMP/base-app"
+            mkdir -p "$RUNNER_TEMP/base-app"
+            unzip -q -o "$BASE_IPA" -d "$RUNNER_TEMP/base-app"
+            BASE_APP=$(find "$RUNNER_TEMP/base-app/Payload" -maxdepth 1 -name '*.app' -type d | head -n 1)
           else
             echo "::warning::未提供底包，使用 MonkeyDev 示例 App 做冒烟构建（产物不含哔哩哔哩）"
-            cp -R "$MONKEYDEV_DIR/Resource/TargetApp.app" "$APP_TARGET/TargetApp/"
+            BASE_APP="$MONKEYDEV_DIR/Resource/TargetApp.app"
             MODE=demo
           fi
 
+          # 底包放在仓库目录之外，通过 MONKEYDEV_INPUT_APP 交给 pack.sh，
+          # 避免它被 Xcode 的同步文件组当成资源打进 App。
+          test -d "$BASE_APP"
+          echo "底包 App：$BASE_APP"
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
-          ls -la "$APP_TARGET/TargetApp"
+          echo "app_path=$BASE_APP" >> "$GITHUB_OUTPUT"
 
       - name: 编译 App 并注入 dylib
         run: |
@@ -148,6 +155,7 @@ jobs:
             ARCHS=arm64 \
             ONLY_ACTIVE_ARCH=NO \
             SYMROOT="$PWD/build" \
+            MONKEYDEV_INPUT_APP="${{ steps.base.outputs.app_path }}" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
