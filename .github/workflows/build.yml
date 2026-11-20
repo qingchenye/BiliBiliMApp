@@ -1,10 +1,15 @@
 name: 云端构建
 
 # 触发方式：
-#   - 推送到 main（仅改动代码时；纯文档/issue 模板改动不触发）
-#   - 任意 Pull Request
-#   - 手动运行（Actions 页面 → 云端构建 → Run workflow）
-#   - 推送 v* 标签（会额外创建一个 Release 并附上 dylib）
+#   - 推送到 main（仅改动代码时；纯文档/issue 模板改动不触发）→ 产出未签名 ipa 并更新滚动 Release（tag: latest）
+#   - 推送 v* 标签 → 额外发布版本化 Release
+#   - 任意 Pull Request / 手动运行（可填底包直链）
+#
+# 未签名 ipa = 「底包（解密后的哔哩哔哩 .app/.ipa）」+「本次编译出的 tweak dylib」注入后重新打包。
+# 底包来源（按优先级）：
+#   1. 手动运行 workflow 时填写的 ipa_url
+#   2. 本仓库 Release（tag: target-app）里的资产 bilibili.ipa
+#   3. 都没有 → 用 MonkeyDev 自带的示例 App 做冒烟构建（只上传 artifact，不发布 Release）
 on:
   push:
     branches: [main]
@@ -14,6 +19,11 @@ on:
       - '.github/ISSUE_TEMPLATE/**'
   pull_request:
   workflow_dispatch:
+    inputs:
+      ipa_url:
+        description: '底包 ipa 下载直链（留空则用 Release target-app/bilibili.ipa）'
+        required: false
+        default: ''
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -25,11 +35,14 @@ permissions:
 env:
   THEOS_DIR: /opt/theos
   MONKEYDEV_DIR: /opt/MonkeyDev
-  TARGET_NAME: BiliBiliMDDylib
+  APP_TARGET: BiliBiliMD
+  DYLIB_TARGET: BiliBiliMDDylib
+  BASE_IPA_TAG: target-app
+  BASE_IPA_ASSET: bilibili.ipa
 
 jobs:
   build:
-    name: 构建 libBiliBiliMDDylib.dylib
+    name: 构建未签名 ipa
     # 用 macos-latest：固定版本号（macos-13/14/15）会随 GitHub 下线而排队拿不到机器
     runs-on: macos-latest
     timeout-minutes: 40
@@ -39,13 +52,12 @@ jobs:
         uses: actions/checkout@v4
 
       # 工程按 MonkeyDev 模板配置，依赖：
-      #   /opt/theos                  → Prefix.pch、vendor/include（rootless.h、substrate.h 等）、
-      #                                 vendor/lib/libroot.a、vendor/lib/Cycript.framework
-      #   /opt/MonkeyDev/include      → CaptainHook/CaptainHook.h、substrate.h
-      #   /opt/MonkeyDev/Frameworks   → libsubstrate.dylib（工程用 -weak_library 弱链接）
-      #   /opt/MonkeyDev/bin/md       → Logos 预处理（.mm 已随仓库提交，这里用占位脚本跳过）
+      #   /opt/theos                  → Prefix.pch、vendor/include（rootless.h、substrate.h 等）、vendor/lib/libroot.a
+      #   /opt/MonkeyDev/Tools/pack.sh → App 打包阶段：解底包、拷 dylib、注入 LC_LOAD_DYLIB
+      #   /opt/MonkeyDev/bin          → monkeyparser（Mach-O 注入）、createIPA.command（打 ipa）
+      #   /opt/MonkeyDev/Frameworks   → libsubstrate.dylib（工程用 -weak_library 弱链接，这里给占位库）
       # 全部在 runner 上临时准备，不修改仓库里的任何工程文件。
-      - name: 准备编译环境（Theos + MonkeyDev 头文件）
+      - name: 准备编译环境（Theos + MonkeyDev）
         run: |
           set -euo pipefail
           echo "Xcode: $(xcodebuild -version | tr '\n' ' ')"
@@ -58,35 +70,79 @@ jobs:
           test -f "$THEOS_DIR/vendor/lib/libroot.a"
           echo "::endgroup::"
 
-          echo "::group::MonkeyDev 头文件与占位库 → $MONKEYDEV_DIR"
+          echo "::group::MonkeyDev → $MONKEYDEV_DIR"
           git clone --depth 1 https://github.com/AloneMonkey/MonkeyDev.git "$RUNNER_TEMP/MonkeyDev"
-          sudo mkdir -p "$MONKEYDEV_DIR/bin" "$MONKEYDEV_DIR/include" "$MONKEYDEV_DIR/Frameworks"
-          sudo cp -R "$RUNNER_TEMP/MonkeyDev/include/." "$MONKEYDEV_DIR/include/"
-          test -f "$MONKEYDEV_DIR/include/CaptainHook/CaptainHook.h"
+          sudo mkdir -p "$MONKEYDEV_DIR"
+          sudo rsync -a "$RUNNER_TEMP/MonkeyDev/./" "$MONKEYDEV_DIR/"
+          test -x "$MONKEYDEV_DIR/bin/monkeyparser"
+          test -f "$MONKEYDEV_DIR/Tools/pack.sh"
+          sudo chmod +x "$MONKEYDEV_DIR/bin/monkeyparser" "$MONKEYDEV_DIR/bin/createIPA.command"
 
           # Logos 预处理：仓库里 .xm 与生成的 .mm 都提交了，编译用的是 .mm，
-          # 所以这一步用占位脚本跳过，避免依赖 MonkeyDev 完整安装。
+          # 这一步用占位脚本跳过，避免依赖 MonkeyDev 的完整 Logos 工具链。
           printf '#!/bin/sh\necho "[ci] 跳过 Logos 预处理（.mm 已随仓库提交）"\nexit 0\n' \
             | sudo tee "$MONKEYDEV_DIR/bin/md" >/dev/null
           sudo chmod +x "$MONKEYDEV_DIR/bin/md"
 
-          # 工程用 -weak_library 弱链接 libsubstrate.dylib（符号在注入后由宿主提供），
-          # 这里生成一个空的 arm64 占位 dylib 满足链接即可。
+          # 工程用 -weak_library 弱链接 libsubstrate.dylib，生成空占位库满足链接即可。
           printf 'void nj_ci_substrate_stub(void) {}\n' > "$RUNNER_TEMP/stub.c"
           sudo xcrun --sdk iphoneos clang \
             -arch arm64 -miphoneos-version-min=13.0 -dynamiclib \
             -install_name /usr/lib/libsubstrate.dylib \
             "$RUNNER_TEMP/stub.c" \
             -o "$MONKEYDEV_DIR/Frameworks/libsubstrate.dylib"
-          file "$MONKEYDEV_DIR/Frameworks/libsubstrate.dylib"
           echo "::endgroup::"
 
-      - name: 编译 dylib
+      - name: 准备底包
+        id: base
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_IPA_URL: ${{ inputs.ipa_url }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$APP_TARGET/TargetApp"
+          BASE_IPA="$RUNNER_TEMP/base.ipa"
+          MODE=""
+
+          if [ -n "${INPUT_IPA_URL}" ]; then
+            echo "底包来源：手动填写的直链"
+            curl -fL --retry 3 --retry-all-errors -o "$BASE_IPA" "$INPUT_IPA_URL"
+            MODE=real
+          elif gh release download "$BASE_IPA_TAG" --pattern "$BASE_IPA_ASSET" --dir "$RUNNER_TEMP" 2>/dev/null; then
+            echo "底包来源：Release ${BASE_IPA_TAG}/${BASE_IPA_ASSET}"
+            MODE=real
+          elif [ -f "$RUNNER_TEMP/$BASE_IPA_ASSET" ]; then
+            echo "底包来源：Release ${BASE_IPA_TAG}/${BASE_IPA_ASSET}"
+            MODE=real
+          fi
+
+          if [ "$MODE" = "real" ]; then
+            [ -f "$BASE_IPA" ] || BASE_IPA="$RUNNER_TEMP/$BASE_IPA_ASSET"
+            test -f "$BASE_IPA"
+            echo "底包大小：$(du -h "$BASE_IPA" | cut -f1)"
+            # 底包必须是「一个 Payload/*.app」的未加密 ipa
+            APPS=$(unzip -Z1 "$BASE_IPA" | grep -c '^Payload/[^/]*\.app/Info\.plist$' || true)
+            if [ "$APPS" != "1" ]; then
+              echo "::error::底包结构异常：期望恰好一个 Payload/*.app，实际匹配 $APPS 个"
+              unzip -Z1 "$BASE_IPA" | head -20
+              exit 1
+            fi
+            cp "$BASE_IPA" "$APP_TARGET/TargetApp/base.ipa"
+          else
+            echo "::warning::未提供底包，使用 MonkeyDev 示例 App 做冒烟构建（产物不含哔哩哔哩）"
+            cp -R "$MONKEYDEV_DIR/Resource/TargetApp.app" "$APP_TARGET/TargetApp/"
+            MODE=demo
+          fi
+
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+          ls -la "$APP_TARGET/TargetApp"
+
+      - name: 编译 App 并注入 dylib
         run: |
           set -o pipefail
           xcodebuild \
             -project BiliBiliMD.xcodeproj \
-            -target "$TARGET_NAME" \
+            -target "$APP_TARGET" \
             -configuration Release \
             -sdk iphoneos \
             ARCHS=arm64 \
@@ -95,42 +151,59 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            CODE_SIGN_ENTITLEMENTS="" \
             build 2>&1 | tee "$RUNNER_TEMP/xcodebuild.log"
 
-      - name: 伪签名并整理产物
+      - name: 去掉签名并打包未签名 ipa
         run: |
           set -euo pipefail
-          DYLIB="$PWD/build/Release-iphoneos/libBiliBiliMDDylib.dylib"
-          test -f "$DYLIB"
+          APP="$PWD/build/Release-iphoneos/${APP_TARGET}.app"
+          test -d "$APP" || { echo "::error::没有找到构建产物 $APP"; exit 1; }
 
-          brew install ldid >/dev/null 2>&1 || true
-          if command -v ldid >/dev/null 2>&1; then
-            ldid -S "$DYLIB"
-            echo "签名：ldid 伪签名"
-          else
-            codesign --force --sign - "$DYLIB"
-            echo "签名：codesign 临时签名"
-          fi
+          MAIN_BIN=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist")
+          echo "主程序：$MAIN_BIN"
+          echo "已注入的 load command："
+          otool -l "$APP/$MAIN_BIN" | grep -A2 'LC_LOAD_DYLIB' | grep -i "lib${DYLIB_TARGET}" || {
+            echo "::error::dylib 没有被注入到主程序"; exit 1; }
+
+          # 未签名 ipa：清掉原包所有签名与 App Store 残留
+          find "$APP" -name '_CodeSignature' -prune -exec rm -rf {} + 2>/dev/null || true
+          rm -rf "$APP/SC_Info" "$APP/PlugIns" "$APP/Watch" "$APP/embedded.mobileprovision"
+          while IFS= read -r -d '' f; do
+            if /usr/bin/file -b "$f" | grep -q 'Mach-O'; then
+              /usr/bin/codesign --remove-signature "$f" 2>/dev/null || true
+            fi
+          done < <(find "$APP" -type f -print0)
+          chmod +x "$APP/$MAIN_BIN"
+
+          APP_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Info.plist" 2>/dev/null || echo unknown)
+          APP_BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist" 2>/dev/null || echo unknown)
 
           SHORT_SHA="${GITHUB_SHA::7}"
           OUT="$RUNNER_TEMP/out"
-          mkdir -p "$OUT"
-          cp "$DYLIB" "$OUT/libBiliBiliMDDylib-${SHORT_SHA}.dylib"
-          if [ -d "$PWD/build/Release-iphoneos/libBiliBiliMDDylib.dylib.dSYM" ]; then
-            cp -R "$PWD/build/Release-iphoneos/libBiliBiliMDDylib.dylib.dSYM" "$OUT/"
-          fi
+          rm -rf "$OUT" "$RUNNER_TEMP/ipa"
+          mkdir -p "$OUT" "$RUNNER_TEMP/ipa/Payload"
+          cp -pR "$APP" "$RUNNER_TEMP/ipa/Payload/"
+          ( cd "$RUNNER_TEMP/ipa" && /usr/bin/zip -qry "$OUT/BiliBiliMD-${APP_VERSION}-${SHORT_SHA}-unsigned.ipa" Payload )
+
+          DYLIB="$PWD/build/Release-iphoneos/lib${DYLIB_TARGET}.dylib"
+          [ -f "$DYLIB" ] && cp "$DYLIB" "$OUT/"
+          [ -d "$DYLIB.dSYM" ] && cp -R "$DYLIB.dSYM" "$OUT/"
 
           {
             echo "commit: $GITHUB_SHA"
             echo "ref:    $GITHUB_REF"
             echo "built:  $(date -u +%FT%TZ)"
+            echo "mode:   ${{ steps.base.outputs.mode }}"
+            echo "bundle: $APP_BUNDLE_ID  version: $APP_VERSION"
             xcodebuild -version
             echo
-            lipo -info "$DYLIB"
+            lipo -info "$APP/$MAIN_BIN" || true
             echo
-            echo "--- 依赖库 ---"
-            otool -L "$DYLIB"
+            echo "--- 注入的 dylib ---"
+            otool -l "$APP/$MAIN_BIN" | grep -A2 'LC_LOAD_DYLIB' | grep -i "lib${DYLIB_TARGET}" || true
+            echo
+            echo "--- ipa 内容（前 20 项）---"
+            unzip -Z1 "$OUT"/*.ipa | head -20
           } > "$OUT/build-info.txt"
 
           echo '### 构建产物' >> "$GITHUB_STEP_SUMMARY"
@@ -142,7 +215,7 @@ jobs:
       - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
-          name: BiliBiliMDDylib-${{ github.sha }}
+          name: BiliBiliMD-unsigned-ipa-${{ github.sha }}
           path: ${{ runner.temp }}/out/*
           if-no-files-found: error
           retention-days: 30
@@ -156,7 +229,25 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      - name: 发布 Release（推送 v* 标签时）
+      # main 分支每次构建成功都更新同一个滚动 Release，下载地址固定不变
+      - name: 更新滚动 Release（latest）
+        if: github.ref == 'refs/heads/main' && steps.base.outputs.mode == 'real'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: 最新未签名 ipa
+          prerelease: true
+          make_latest: false
+          files: ${{ runner.temp }}/out/*.ipa
+          body: |
+            未签名 ipa（含按等级屏蔽评论功能），由 GitHub Actions 自动构建。
+
+            - commit: ${{ github.sha }}
+            - 构建记录: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            - 签名方式: 未签名，请自行用 AltStore / Sideloadly / TrollStore 等工具签名安装
+
+      # 打 v* 标签时额外发布版本化 Release
+      - name: 发布版本 Release（v* 标签）
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
