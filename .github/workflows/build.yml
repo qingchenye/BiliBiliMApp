@@ -1,0 +1,164 @@
+name: 云端构建
+
+# 触发方式：
+#   - 推送到 main（仅改动代码时；纯文档/issue 模板改动不触发）
+#   - 任意 Pull Request
+#   - 手动运行（Actions 页面 → 云端构建 → Run workflow）
+#   - 推送 v* 标签（会额外创建一个 Release 并附上 dylib）
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths-ignore:
+      - '**.md'
+      - '.github/ISSUE_TEMPLATE/**'
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  THEOS_DIR: /opt/theos
+  MONKEYDEV_DIR: /opt/MonkeyDev
+  TARGET_NAME: BiliBiliMDDylib
+
+jobs:
+  build:
+    name: 构建 libBiliBiliMDDylib.dylib
+    runs-on: macos-15
+    timeout-minutes: 40
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      # 工程按 MonkeyDev 模板配置，依赖：
+      #   /opt/theos                  → Prefix.pch、vendor/include（rootless.h、substrate.h 等）、
+      #                                 vendor/lib/libroot.a、vendor/lib/Cycript.framework
+      #   /opt/MonkeyDev/include      → CaptainHook/CaptainHook.h、substrate.h
+      #   /opt/MonkeyDev/Frameworks   → libsubstrate.dylib（工程用 -weak_library 弱链接）
+      #   /opt/MonkeyDev/bin/md       → Logos 预处理（.mm 已随仓库提交，这里用占位脚本跳过）
+      # 全部在 runner 上临时准备，不修改仓库里的任何工程文件。
+      - name: 准备编译环境（Theos + MonkeyDev 头文件）
+        run: |
+          set -euo pipefail
+          echo "Xcode: $(xcodebuild -version | tr '\n' ' ')"
+          echo "SDK: $(xcrun --sdk iphoneos --show-sdk-version)"
+
+          echo "::group::Theos → $THEOS_DIR"
+          sudo git clone --recursive --depth 1 https://github.com/theos/theos.git "$THEOS_DIR"
+          test -f "$THEOS_DIR/Prefix.pch"
+          test -f "$THEOS_DIR/vendor/include/rootless.h"
+          test -f "$THEOS_DIR/vendor/lib/libroot.a"
+          echo "::endgroup::"
+
+          echo "::group::MonkeyDev 头文件与占位库 → $MONKEYDEV_DIR"
+          git clone --depth 1 https://github.com/AloneMonkey/MonkeyDev.git "$RUNNER_TEMP/MonkeyDev"
+          sudo mkdir -p "$MONKEYDEV_DIR/bin" "$MONKEYDEV_DIR/include" "$MONKEYDEV_DIR/Frameworks"
+          sudo cp -R "$RUNNER_TEMP/MonkeyDev/include/." "$MONKEYDEV_DIR/include/"
+          test -f "$MONKEYDEV_DIR/include/CaptainHook/CaptainHook.h"
+
+          # Logos 预处理：仓库里 .xm 与生成的 .mm 都提交了，编译用的是 .mm，
+          # 所以这一步用占位脚本跳过，避免依赖 MonkeyDev 完整安装。
+          printf '#!/bin/sh\necho "[ci] 跳过 Logos 预处理（.mm 已随仓库提交）"\nexit 0\n' \
+            | sudo tee "$MONKEYDEV_DIR/bin/md" >/dev/null
+          sudo chmod +x "$MONKEYDEV_DIR/bin/md"
+
+          # 工程用 -weak_library 弱链接 libsubstrate.dylib（符号在注入后由宿主提供），
+          # 这里生成一个空的 arm64 占位 dylib 满足链接即可。
+          printf 'void nj_ci_substrate_stub(void) {}\n' > "$RUNNER_TEMP/stub.c"
+          sudo xcrun --sdk iphoneos clang \
+            -arch arm64 -miphoneos-version-min=13.0 -dynamiclib \
+            -install_name /usr/lib/libsubstrate.dylib \
+            "$RUNNER_TEMP/stub.c" \
+            -o "$MONKEYDEV_DIR/Frameworks/libsubstrate.dylib"
+          file "$MONKEYDEV_DIR/Frameworks/libsubstrate.dylib"
+          echo "::endgroup::"
+
+      - name: 编译 dylib
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project BiliBiliMD.xcodeproj \
+            -target "$TARGET_NAME" \
+            -configuration Release \
+            -sdk iphoneos \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=NO \
+            SYMROOT="$PWD/build" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS="" \
+            build 2>&1 | tee "$RUNNER_TEMP/xcodebuild.log"
+
+      - name: 伪签名并整理产物
+        run: |
+          set -euo pipefail
+          DYLIB="$PWD/build/Release-iphoneos/libBiliBiliMDDylib.dylib"
+          test -f "$DYLIB"
+
+          brew install ldid >/dev/null 2>&1 || true
+          if command -v ldid >/dev/null 2>&1; then
+            ldid -S "$DYLIB"
+            echo "签名：ldid 伪签名"
+          else
+            codesign --force --sign - "$DYLIB"
+            echo "签名：codesign 临时签名"
+          fi
+
+          SHORT_SHA="${GITHUB_SHA::7}"
+          OUT="$RUNNER_TEMP/out"
+          mkdir -p "$OUT"
+          cp "$DYLIB" "$OUT/libBiliBiliMDDylib-${SHORT_SHA}.dylib"
+          if [ -d "$PWD/build/Release-iphoneos/libBiliBiliMDDylib.dylib.dSYM" ]; then
+            cp -R "$PWD/build/Release-iphoneos/libBiliBiliMDDylib.dylib.dSYM" "$OUT/"
+          fi
+
+          {
+            echo "commit: $GITHUB_SHA"
+            echo "ref:    $GITHUB_REF"
+            echo "built:  $(date -u +%FT%TZ)"
+            xcodebuild -version
+            echo
+            lipo -info "$DYLIB"
+            echo
+            echo "--- 依赖库 ---"
+            otool -L "$DYLIB"
+          } > "$OUT/build-info.txt"
+
+          echo '### 构建产物' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat "$OUT/build-info.txt" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          ls -lh "$OUT"
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: BiliBiliMDDylib-${{ github.sha }}
+          path: ${{ runner.temp }}/out/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: 上传构建日志（失败时）
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log-${{ github.sha }}
+          path: ${{ runner.temp }}/xcodebuild.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: 发布 Release（推送 v* 标签时）
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ runner.temp }}/out/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
