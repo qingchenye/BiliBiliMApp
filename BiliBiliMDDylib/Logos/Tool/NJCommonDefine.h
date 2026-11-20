@@ -81,6 +81,15 @@ NS_ASSUME_NONNULL_BEGIN
 #define NJ_VERTICAL_SCREEN_MODE_VALUE ([NJ_SETTING_CACHE containsObjectForKey:NJ_VERTICAL_SCREEN_MODE_KEY] && \
 [(NSNumber *)[NJ_SETTING_CACHE objectForKey:NJ_VERTICAL_SCREEN_MODE_KEY] boolValue])
 
+/// 按等级屏蔽评论
+#define NJ_COMMENT_FILTER_KEY @"NJ_COMMENT_FILTER_KEY"
+/// 按等级屏蔽评论的值
+#define NJ_COMMENT_FILTER_VALUE ([NJ_SETTING_CACHE containsObjectForKey:NJ_COMMENT_FILTER_KEY] && \
+[(NSNumber *)[NJ_SETTING_CACHE objectForKey:NJ_COMMENT_FILTER_KEY] boolValue])
+
+/// 屏蔽评论等级
+#define NJ_COMMENT_FILTER_LEVEL_KEY @"NJ_COMMENT_FILTER_LEVEL_KEY"
+
 /// --------------------- 设置页面 ---------------------
 
 /// --------------------- 单例 ---------------------

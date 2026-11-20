@@ -47,6 +47,11 @@
                                                            cellId:NJ_SWITCH_CELL_ID
                                                             title:@"竖屏模式"
                                                                   on:NJ_VERTICAL_SCREEN_MODE_VALUE saveKey:NJ_VERTICAL_SCREEN_MODE_KEY]];
+    [datas addObject:[[NJSettingSwitchViewModel alloc] initWithBizId:NJ_COMMENT_FILTER_BIZ_ID
+                                                           cellId:NJ_SWITCH_CELL_ID
+                                                            title:@"按等级屏蔽评论"
+                                                                  on:NJ_COMMENT_FILTER_VALUE saveKey:NJ_COMMENT_FILTER_KEY]];
+    [datas addObject:[self commentFilterLevel]];
     [datas addObject:[[NJSettingSkullViewModel alloc] initWithBizId:NJ_SHARE_DATA_BIZ_ID
                                                              cellId:NJ_COMMON_CELL_ID
                                                               title:@"分享数据"]];
@@ -92,6 +97,20 @@
     [tabs addObject:[[NJInlineSettingModel alloc] initWithTitle:@"全部" bizId:@"all" selected:NO]];
     [tabs addObject:[[NJInlineSettingModel alloc] initWithTitle:@"视频" bizId:@"video" selected:NO]];
     return [tabs copy];
+}
+
+/// 屏蔽评论等级
+- (NJSettingSkullViewModel *)commentFilterLevel {
+    NJSettingSkullViewModel *model = [[NJSettingSkullViewModel alloc] initWithBizId:NJ_COMMENT_FILTER_LEVEL_BIZ_ID
+                                                                             cellId:NJ_ARROW_CELL_ID
+                                                                              title:@"屏蔽评论等级"];
+    model.subTitle = [self commentFilterLevelSubTitle];
+    return model;
+}
+
+- (NSString *)commentFilterLevelSubTitle {
+    NSString *level = [[NJSettingCache sharedInstance] commentFilterLevel];
+    return [NSString stringWithFormat:@"屏蔽 Lv.%@ 及以下", level];
 }
 
 /// 版本

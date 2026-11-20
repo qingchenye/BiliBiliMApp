@@ -336,6 +336,8 @@
 		BF9A73CA2F9469AB008EB74C /* SVProgressAnimatedView.m in Sources */ = {isa = PBXBuildFile; fileRef = BF9A72872F9469AB008EB74C /* SVProgressAnimatedView.m */; };
 		BF9A73CB2F9469AB008EB74C /* NJMineDataHandler.m in Sources */ = {isa = PBXBuildFile; fileRef = BF9A71E12F9469AB008EB74C /* NJMineDataHandler.m */; };
 		BF9A73CC2F9469AB008EB74C /* NJSettingSeparatorHeaderView.m in Sources */ = {isa = PBXBuildFile; fileRef = BF9A720F2F9469AB008EB74C /* NJSettingSeparatorHeaderView.m */; };
+		BF9A73D32F9469AB008EB74C /* NJCommentFilterTool.m in Sources */ = {isa = PBXBuildFile; fileRef = BF9A73D12F9469AB008EB74C /* NJCommentFilterTool.m */; };
+		BF9A73D42F9469AB008EB74C /* NJCommentFilter.m in Sources */ = {isa = PBXBuildFile; fileRef = BF9A73D22F9469AB008EB74C /* NJCommentFilter.m */; };
 		BFB4F2E12F03FB1C004F7292 /* libroot.a in Frameworks */ = {isa = PBXBuildFile; fileRef = BFB4F2E02F03FB1C004F7292 /* libroot.a */; };
 		BFDA21812E65CD7300E3249E /* fishhook.h in Headers */ = {isa = PBXBuildFile; fileRef = BFDA217F2E65CD7300E3249E /* fishhook.h */; };
 		BFDA21822E65CD7300E3249E /* fishhook.c in Sources */ = {isa = PBXBuildFile; fileRef = BFDA21802E65CD7300E3249E /* fishhook.c */; };
@@ -719,6 +721,9 @@
 		BF9A729D2F9469AB008EB74C /* NJPluginInfo.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = NJPluginInfo.m; sourceTree = "<group>"; };
 		BF9A729E2F9469AB008EB74C /* NJSettingCache.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = NJSettingCache.h; sourceTree = "<group>"; };
 		BF9A729F2F9469AB008EB74C /* NJSettingCache.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = NJSettingCache.m; sourceTree = "<group>"; };
+		BF9A73D02F9469AB008EB74C /* NJCommentFilterTool.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = NJCommentFilterTool.h; sourceTree = "<group>"; };
+		BF9A73D12F9469AB008EB74C /* NJCommentFilterTool.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = NJCommentFilterTool.m; sourceTree = "<group>"; };
+		BF9A73D22F9469AB008EB74C /* NJCommentFilter.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = NJCommentFilter.m; sourceTree = "<group>"; };
 		BFB4F2E02F03FB1C004F7292 /* libroot.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libroot.a; path = ../../../../../../../opt/theos/vendor/lib/libroot.a; sourceTree = "<group>"; };
 		BFDA217F2E65CD7300E3249E /* fishhook.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = fishhook.h; sourceTree = "<group>"; };
 		BFDA21802E65CD7300E3249E /* fishhook.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = fishhook.c; sourceTree = "<group>"; };
@@ -995,6 +1000,9 @@
 				BF9A71732F9469AB008EB74C /* NJShareChannelsDataItem.m */,
 				BF9A71742F9469AB008EB74C /* NJUpperRcmdDataItem.h */,
 				BF9A71752F9469AB008EB74C /* NJUpperRcmdDataItem.m */,
+				BF9A73D02F9469AB008EB74C /* NJCommentFilterTool.h */,
+				BF9A73D12F9469AB008EB74C /* NJCommentFilterTool.m */,
+				BF9A73D22F9469AB008EB74C /* NJCommentFilter.m */,
 			);
 			path = Detail;
 			sourceTree = "<group>";
@@ -2084,6 +2092,8 @@
 				BF9A73CA2F9469AB008EB74C /* SVProgressAnimatedView.m in Sources */,
 				BF9A73CB2F9469AB008EB74C /* NJMineDataHandler.m in Sources */,
 				BF9A73CC2F9469AB008EB74C /* NJSettingSeparatorHeaderView.m in Sources */,
+				BF9A73D32F9469AB008EB74C /* NJCommentFilterTool.m in Sources */,
+				BF9A73D42F9469AB008EB74C /* NJCommentFilter.m in Sources */,
 				BF0D03402DEDA95900115365 /* a1a2-selectortramps-x86_64.s in Sources */,
 				BF0D034A2DEDA95900115365 /* OCMethodTrace.m in Sources */,
 				BF0D032F2DEDA95900115365 /* MDConfigManager.m in Sources */,

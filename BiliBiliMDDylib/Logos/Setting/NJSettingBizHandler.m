@@ -90,6 +90,11 @@
         [self handleFollowDefaultTabWithViewModel:viewModel];
         return;
     }
+    // 屏蔽评论等级
+    if ([bizId isEqualToString:NJ_COMMENT_FILTER_LEVEL_BIZ_ID]) {
+        [self handleCommentFilterLevelWithViewModel:viewModel];
+        return;
+    }
 }
 
 #pragma mark - Private Methods
@@ -146,6 +151,36 @@
     viewModel.subTitle = model.title;
     // 保存
     [[NJSettingCache sharedInstance] saveFollowDefaultTab:model.bizId];
+    [self.tableView reloadData];
+}
+
+/// 点击屏蔽评论等级
+/// - Parameter viewModel: 数据
+- (void)handleCommentFilterLevelWithViewModel:(NJSettingSkullViewModel *)viewModel {
+    NSString *selectedLevel = [[NJSettingCache sharedInstance] commentFilterLevel];
+    NSMutableArray<NJInlineSettingModel *> *dataSource = [NSMutableArray array];
+    for (NSInteger level = 0; level <= 5; level++) {
+        NSString *levelStr = [NSString stringWithFormat:@"%ld", (long)level];
+        BOOL selected = [levelStr isEqualToString:selectedLevel];
+        NSString *title = [NSString stringWithFormat:@"屏蔽 Lv.%ld 及以下", (long)level];
+        NJInlineSettingModel *model = [[NJInlineSettingModel alloc] initWithTitle:title bizId:levelStr selected:selected];
+        [dataSource addObject:model];
+    }
+    
+    NJInlineSettingViewController *inlineVC = [[NJInlineSettingViewController alloc] initWithStyle:UITableViewStylePlain title:@"屏蔽评论等级" dataSource:[dataSource copy]];
+    __weak typeof(self) weakSelf = self;
+    inlineVC.selectedHandler = ^(NJInlineSettingModel * _Nonnull model) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        [strongSelf handleChangeCommentFilterLevel:model viewModel:viewModel];
+    };
+    [self.settingViewController.navigationController pushViewController:inlineVC animated:YES];
+}
+
+- (void)handleChangeCommentFilterLevel:(NJInlineSettingModel *)model viewModel:(NJSettingSkullViewModel *)viewModel {
+    viewModel.subTitle = model.title;
+    // 保存
+    [[NJSettingCache sharedInstance] saveCommentFilterLevel:model.bizId];
+    [self rebootTip];
     [self.tableView reloadData];
 }
 

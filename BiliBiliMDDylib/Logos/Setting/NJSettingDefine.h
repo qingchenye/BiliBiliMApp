@@ -35,6 +35,10 @@
 #define NJ_AUTO_RECEIVE_COUPON_BIZ_ID @"autoReceiveCoupon"
 // 竖屏模式
 #define NJ_VERTICAL_SCREEN_MODE_BIZ_ID @"verticalScreenMode"
+// 按等级屏蔽评论
+#define NJ_COMMENT_FILTER_BIZ_ID @"commentFilter"
+// 屏蔽评论等级
+#define NJ_COMMENT_FILTER_LEVEL_BIZ_ID @"commentFilterLevel"
 // 分享数据
 #define NJ_SHARE_DATA_BIZ_ID @"shareData"
 // 版本

@@ -13,6 +13,9 @@
 /// 关注的默认版块
 #define NJ_SETTING_FOLLOW_DEFAULT_TAB_KEY @"SETTING_FOLLOW_DEFAULT_TAB"
 #define NJ_SETTING_FOLLOW_DEFAULT_TAB_VALUE @"all"
+/// 屏蔽评论等级
+#define NJ_SETTING_COMMENT_FILTER_LEVEL_KEY @"SETTING_COMMENT_FILTER_LEVEL"
+#define NJ_SETTING_COMMENT_FILTER_LEVEL_VALUE @"2"
 
 @implementation NJSettingCache
 
@@ -96,6 +99,27 @@
 - (void)saveFollowDefaultTab:(NSString *)tab {
     [self.cache setObject:tab
                    forKey:NJ_SETTING_FOLLOW_DEFAULT_TAB_KEY
+                withBlock:nil];
+}
+
+#pragma mark 屏蔽评论等级
+
+/// 获取屏蔽评论等级
+- (NSString *)commentFilterLevel {
+    NSString *level = (NSString *)[self.cache objectForKey:NJ_SETTING_COMMENT_FILTER_LEVEL_KEY];
+    // 使用默认值
+    if (level.length == 0) {
+        level = NJ_SETTING_COMMENT_FILTER_LEVEL_VALUE;
+        // 保存
+        [self.cache setObject:level forKey:NJ_SETTING_COMMENT_FILTER_LEVEL_KEY];
+    }
+    return level;
+}
+
+/// 保存屏蔽评论等级
+- (void)saveCommentFilterLevel:(NSString *)level {
+    [self.cache setObject:level
+                   forKey:NJ_SETTING_COMMENT_FILTER_LEVEL_KEY
                 withBlock:nil];
 }
 

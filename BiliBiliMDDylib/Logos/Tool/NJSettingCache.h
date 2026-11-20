@@ -33,6 +33,12 @@ NS_ASSUME_NONNULL_BEGIN
 /// 保存关注的默认版块
 - (void)saveFollowDefaultTab:(NSString *)tab;
 
+/// 获取屏蔽评论等级
+- (NSString *)commentFilterLevel;
+
+/// 保存屏蔽评论等级
+- (void)saveCommentFilterLevel:(NSString *)level;
+
 @end
 
 NS_ASSUME_NONNULL_END
