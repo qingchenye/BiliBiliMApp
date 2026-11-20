@@ -30,7 +30,8 @@ env:
 jobs:
   build:
     name: 构建 libBiliBiliMDDylib.dylib
-    runs-on: macos-15
+    # 用 macos-latest：固定版本号（macos-13/14/15）会随 GitHub 下线而排队拿不到机器
+    runs-on: macos-latest
     timeout-minutes: 40
 
     steps:
